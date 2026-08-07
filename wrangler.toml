@@ -1,0 +1,19 @@
+name = "captureflare"
+main = "worker.js"
+compatibility_date = "2026-08-01"
+
+[browser]
+binding = "BROWSER"
+
+[[kv_namespaces]]
+binding = "API_KEYS"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "captureflare-db"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+
+# Secrets (set via `wrangler secret put` or dashboard > Settings > Variables):
+#   LEMONSQUEEZY_WEBHOOK_SECRET
+#   ADMIN_TOKEN
