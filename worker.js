@@ -11,6 +11,7 @@
  * Env vars (secrets):
  *   - LEMONSQUEEZY_WEBHOOK_SECRET
  *   - ADMIN_TOKEN  (for manually minting keys before LS webhook is wired up)
+ *   - BREVO_API_KEY (transactional email — sends API key on purchase)
  *
  * SSRF protection — isBlockedTarget(url) exists because this API fetches
  * arbitrary user-supplied URLs server-side (to take screenshots, render PDFs,
@@ -36,7 +37,7 @@ export default {
     }
 
     if (path === "/webhook/lemonsqueezy" && request.method === "POST") {
-      return handleLemonSqueezyWebhook(request, env);
+      return handleLemonSqueezyWebhook(request, env, ctx);
     }
 
     if (path === "/admin/keys" && request.method === "POST") {
@@ -243,7 +244,10 @@ async function handleLemonSqueezyWebhook(request, env) {
       .bind(newKey, email, plan, new Date().toISOString())
       .run();
 
-    // TODO: send the key to `email` via Brevo transactional email
+    // Fire-and-forget: send purchase email via Brevo.  Key is already
+    // provisioned in D1, so a Brevo failure must not break the webhook.
+    ctx.waitUntil(sendPurchaseEmail(env, email, newKey, plan));
+
     return json({ ok: true, provisioned: true });
   }
 
@@ -276,6 +280,59 @@ function timingSafeEqual(a, b) {
   let result = 0;
   for (let i = 0; i < a.length; i++) result |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return result === 0;
+}
+
+// ---------- Brevo transactional email ----------
+
+/**
+ * Sends a purchase-confirmation email with the new API key via Brevo's
+ * transactional email API.  On failure, logs the error but does NOT throw —
+ * the key is already persisted in D1 and must remain usable regardless.
+ *
+ * @param {object} env
+ * @param {string} email
+ * @param {string} apiKey
+ * @param {string} plan
+ */
+async function sendPurchaseEmail(env, email, apiKey, plan) {
+  if (!env.BREVO_API_KEY || !email) return;
+
+  const baseUrl = env.WORKER_URL || "https://captureflare.workers.dev";
+  const planLabel = PLANS[plan]?.name || plan;
+  const dailyLimit = PLANS[plan]?.dailyLimit || 50;
+
+  const htmlBody = [
+    "<div style=\"font-family:system-ui,-apple-system,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#1e293b;\">",
+    "<h1 style=\"font-size:22px;margin:0 0 16px;\">Your Rendrly API key</h1>",
+    "<p style=\"margin:0 0 12px;\">Thanks for subscribing to the <strong>", escapeHtml(planLabel), "</strong> plan ",
+    "(", String(dailyLimit), " requests/day).</p>",
+    "<p style=\"margin:0 0 24px;\"><code style=\"background:#f1f5f9;padding:8px 12px;border-radius:6px;font-size:14px;word-break:break-all;\">", escapeHtml(apiKey), "</code></p>",
+    "<h2 style=\"font-size:16px;margin:0 0 8px;\">Quick start</h2>",
+    "<pre style=\"background:#0f172a;color:#e2e8f0;padding:16px;border-radius:8px;font-size:13px;overflow-x:auto;\">", escapeHtml(`curl "${baseUrl}/v1/screenshot?url=https://example.com&key=${apiKey}" --output screenshot.png`), "</pre>",
+    "<p style=\"margin:16px 0 0;\">Full docs: <a href=\"https://github.com/hardeyhemy/rendrly#readme\" style=\"color:#2563eb;\">github.com/hardeyhemy/rendrly</a></p>",
+    "</div>",
+  ].join("");
+
+  try {
+    const resp = await fetch("https://api.brevo.com/v3/smtp/email", {
+      method: "POST",
+      headers: {
+        "api-key": env.BREVO_API_KEY,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        sender: { name: "Rendrly", email: "noreply@rendrly.com" },
+        to: [{ email }],
+        subject: "Your Rendrly API key",
+        htmlContent: htmlBody,
+      }),
+    });
+    if (!resp.ok) {
+      console.error("Brevo email failed:", resp.status, await resp.text());
+    }
+  } catch (err) {
+    console.error("Brevo email error:", err);
+  }
 }
 
 // ---------- Admin (manual key minting before LS is wired up) ----------
