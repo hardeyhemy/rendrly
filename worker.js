@@ -11,6 +11,13 @@
  * Env vars (secrets):
  *   - LEMONSQUEEZY_WEBHOOK_SECRET
  *   - ADMIN_TOKEN  (for manually minting keys before LS webhook is wired up)
+ *
+ * SSRF protection — isBlockedTarget(url) exists because this API fetches
+ * arbitrary user-supplied URLs server-side (to take screenshots, render PDFs,
+ * etc.).  Without a guard, an attacker could coax the Worker into reaching
+ * internal services, cloud metadata endpoints (169.254.169.254), or the
+ * loopback interface.  The function rejects non-http(s) schemes, loopback
+ * hostnames, link-local / private IP ranges, and .internal/.local TLDs.
  */
 
 const PLANS = {
@@ -61,6 +68,11 @@ async function handleApiRequest(request, env, path, url) {
   const target = url.searchParams.get("url");
   if (!target && path !== "/v1/og") {
     return json({ error: "missing_url_param" }, 400);
+  }
+
+  // SSRF gate — reject internal/private targets before any outbound fetch
+  if (target && isBlockedTarget(target)) {
+    return json({ error: "blocked_target" }, 400);
   }
 
   try {
@@ -283,6 +295,74 @@ async function handleAdminCreateKey(request, env) {
     .run();
 
   return json({ key: newKey, plan });
+}
+
+// ---------- SSRF guard ----------
+
+/**
+ * Returns true when `url` points to a blocked / internal target that must
+ * never be fetched server-side (SSRF protection).
+ *
+ * @param {string} url
+ * @returns {boolean}
+ */
+function isBlockedTarget(url) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    // Not a valid URL at all — treat as blocked.
+    return true;
+  }
+
+  // --- scheme: only http and https are allowed ----------------------------
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return true;
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+
+  // --- literal loopback names --------------------------------------------
+  if (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "0.0.0.0" ||
+    hostname === "[::1]"
+  ) {
+    return true;
+  }
+
+  // --- blocked TLDs (.internal, .local) ----------------------------------
+  if (hostname.endsWith(".internal") || hostname.endsWith(".local")) {
+    return true;
+  }
+
+  // --- IPv4 address range checks -----------------------------------------
+  // Match four decimal octets.  IPv6 is handled above via the literal
+  // [::1] check; other IPv6 loopback/link-local forms (e.g. ::1, fe80::)
+  // cannot appear as hostname in a URL without brackets, and bracketed
+  // forms other than [::1] are let through here — acceptable for a minimal
+  // gate.  Full IPv6 range checks can be added later if needed.
+  const ipv4Match = hostname.match(
+    /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/
+  );
+  if (ipv4Match) {
+    const [, a, b] = ipv4Match.map(Number);
+
+    // 169.254.x.x  — link-local / cloud instance metadata (AWS IMDS, etc.)
+    if (a === 169 && b === 254) return true;
+
+    // 10.x.x.x     — RFC 1918 Class A private
+    if (a === 10) return true;
+
+    // 172.16–31.x.x — RFC 1918 Class B private
+    if (a === 172 && b >= 16 && b <= 31) return true;
+
+    // 192.168.x.x  — RFC 1918 Class C private
+    if (a === 192 && b === 168) return true;
+  }
+
+  return false;
 }
 
 // ---------- Helpers ----------
