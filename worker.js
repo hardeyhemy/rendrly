@@ -59,6 +59,11 @@ async function handleApiRequest(request, env, path, url) {
   const auth = await authenticate(request, env);
   if (!auth.ok) return json({ error: auth.error }, 401);
 
+  // /v1/usage is read-only — does not count against the daily quota
+  if (path === "/v1/usage") {
+    return handleUsageRequest(env, auth.keyRecord);
+  }
+
   const usage = await checkAndIncrementUsage(env, auth.keyRecord);
   if (!usage.ok) {
     return json(
@@ -211,6 +216,32 @@ async function checkAndIncrementUsage(env, keyRecord) {
 
   await env.API_KEYS.put(usageKey, String(current + 1), { expirationTtl: 172800 });
   return { ok: true };
+}
+
+// ---------- Usage endpoint (read-only, no quota impact) ----------
+
+/**
+ * Returns current usage stats for the authenticated key.  Does NOT
+ * increment the usage counter — this is a read-only peek.
+ *
+ * @param {object} env
+ * @param {{ key: string, plan: string }} keyRecord
+ * @returns {Promise<Response>}
+ */
+async function handleUsageRequest(env, keyRecord) {
+  const plan = PLANS[keyRecord.plan] || PLANS.free;
+  const today = new Date().toISOString().slice(0, 10);
+  const usageKey = `usage:${keyRecord.key}:${today}`;
+
+  const usedToday = parseInt((await env.API_KEYS.get(usageKey)) || "0", 10);
+
+  return json({
+    plan: keyRecord.plan,
+    dailyLimit: plan.dailyLimit,
+    usedToday,
+    remaining: Math.max(0, plan.dailyLimit - usedToday),
+    resetAt: `${today}T23:59:59Z`,
+  });
 }
 
 // ---------- Lemon Squeezy provisioning ----------
