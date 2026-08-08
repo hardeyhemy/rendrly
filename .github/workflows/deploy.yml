@@ -1,4 +1,4 @@
-name: Deploy Rendrly to Cloudflare Workers 
+name: Deploy Rendrly to Cloudflare Workers
 
 on:
   push:
