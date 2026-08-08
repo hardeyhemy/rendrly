@@ -49,7 +49,6 @@ Auth: pass the key as `?key=` or header `x-api-key`.
 
 ## Not yet in this MVP (next pass)
 
-- Transactional email on key provisioning (wire into existing Brevo account — send the key on `order_created`).
 - Landing page / pricing page (static, can go on Cloudflare Pages or same Worker).
 - Rate-limit headers in responses (`X-RateLimit-Remaining`).
 - RapidAPI listing for extra distribution.
