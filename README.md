@@ -29,6 +29,8 @@ Auth: pass the key as `?key=` or header `x-api-key`.
 4. Worker → Settings → Variables and Secrets:
    - Add secret `ADMIN_TOKEN` (any long random string — this lets you mint keys manually before Lemon Squeezy is wired up).
    - Add secret `LEMONSQUEEZY_WEBHOOK_SECRET` once you create the LS webhook (step 6).
+   - Add secret `BREVO_API_KEY` (your Brevo account API key for transactional email).
+   - Add secret `SENDER_EMAIL` (optional — the verified sender address for Brevo emails; defaults to `billings@revnuvo.site` if unset).
 5. Mint your first test key:
    ```
    curl -X POST https://captureflare.<your-subdomain>.workers.dev/admin/keys \
@@ -47,7 +49,6 @@ Auth: pass the key as `?key=` or header `x-api-key`.
 
 ## Not yet in this MVP (next pass)
 
-- Transactional email on key provisioning (wire into existing Brevo account — send the key on `order_created`).
 - Landing page / pricing page (static, can go on Cloudflare Pages or same Worker).
 - Rate-limit headers in responses (`X-RateLimit-Remaining`).
 - RapidAPI listing for extra distribution.

@@ -12,6 +12,7 @@
  *   - LEMONSQUEEZY_WEBHOOK_SECRET
  *   - ADMIN_TOKEN  (for manually minting keys before LS webhook is wired up)
  *   - BREVO_API_KEY (transactional email — sends API key on purchase)
+ *   - SENDER_EMAIL  (optional — Brevo sender address, defaults to billings@revnuvo.site)
  *
  * SSRF protection — isBlockedTarget(url) exists because this API fetches
  * arbitrary user-supplied URLs server-side (to take screenshots, render PDFs,
@@ -214,7 +215,7 @@ async function checkAndIncrementUsage(env, keyRecord) {
 
 // ---------- Lemon Squeezy provisioning ----------
 
-async function handleLemonSqueezyWebhook(request, env) {
+async function handleLemonSqueezyWebhook(request, env, ctx) {
   const signature = request.headers.get("x-signature");
   const rawBody = await request.text();
 
@@ -321,7 +322,7 @@ async function sendPurchaseEmail(env, email, apiKey, plan) {
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        sender: { name: "Rendrly", email: "noreply@rendrly.com" },
+        sender: { name: "Rendrly", email: env.SENDER_EMAIL || "billings@revnuvo.site" },
         to: [{ email }],
         subject: "Your Rendrly API key",
         htmlContent: htmlBody,
